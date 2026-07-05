@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCANLINE — a handwritten digit reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0A0C10;
+    --panel: #12151B;
+    --panel-2: #171B23;
+    --border: #262C37;
+    --border-soft: #1D222B;
+    --text: #E9ECF2;
+    --text-dim: #8791A2;
+    --text-faint: #545C6B;
+    --cyan: #4BD8E0;
+    --cyan-dim: #2C7A80;
+    --amber: #FFB454;
+    --amber-dim: #8A6432;
+    --red: #FF6B6B;
+    --radius: 3px;
+  }
+
+  *{ box-sizing: border-box; }
+  html{ scroll-behavior: smooth; }
+  body{
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* faint grid backdrop, like graph paper for a scanning instrument */
+  body::before{
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 28px 28px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrap{ position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+
+  code, .mono{ font-family: 'JetBrains Mono', monospace; }
+  h1, h2, h3, .display{ font-family: 'Space Grotesk', sans-serif; }
+
+  a{ color: var(--cyan); }
+
+  /* ---------- header ---------- */
+  header{
+    border-bottom: 1px solid var(--border-soft);
+    position: sticky; top: 0;
+    background: rgba(10,12,16,0.85);
+    backdrop-filter: blur(8px);
+    z-index: 10;
+  }
+  .header-inner{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 0;
+  }
+  .brand{
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .brand-mark{
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700; font-size: 18px; letter-spacing: 0.02em;
+    color: var(--text);
+  }
+  .brand-mark span{ color: var(--cyan); }
+  .brand-sub{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--text-faint);
+    letter-spacing: 0.04em;
+  }
+  .status-pill{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 12px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .status-dot{
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-faint);
+  }
+  .status-dot.ready{ background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+
+  /* ---------- hero ---------- */
+  .hero{ padding: 64px 0 40px; }
+  .eyebrow{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--amber);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before{
+    content: '';
+    width: 22px; height: 1px; background: var(--amber-dim);
+  }
+  h1{
+    font-size: 42px;
+    line-height: 1.12;
+    font-weight: 600;
+    margin: 0 0 18px;
+    max-width: 720px;
+    letter-spacing: -0.01em;
+  }
+  h1 em{
+    font-style: normal;
+    color: var(--cyan);
+  }
+  .lede{
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    max-width: 560px;
+    margin: 0 0 8px;
+  }
+
+  /* ---------- demo section ---------- */
+  .demo{
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 0;
+    margin-top: 48px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+  }
+  @media (max-width: 760px){
+    .demo{ grid-template-columns: 1fr; }
+  }
+
+  .demo-pane{
+    padding: 28px;
+  }
+  .demo-pane + .demo-pane{
+    border-left: 1px solid var(--border);
+  }
+  @media (max-width: 760px){
+    .demo-pane + .demo-pane{ border-left: none; border-top: 1px solid var(--border); }
+  }
+
+  .pane-label{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  .canvas-frame{
+    position: relative;
+    width: 264px; height: 264px;
+    margin: 0 auto;
+    border: 1px solid var(--border);
+    background: #000;
+    overflow: hidden;
+  }
+  #drawCanvas{
+    width: 100%; height: 100%;
+    display: block;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  .scanline-el{
+    position: absolute;
+    left: 0; right: 0; height: 2px;
+    background: linear-gradient(to right, transparent, var(--cyan), transparent);
+    box-shadow: 0 0 12px var(--cyan);
+    top: -10%;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .scanline-el.sweep{
+    animation: sweepDown 0.55s cubic-bezier(.4,0,.2,1);
+  }
+  @keyframes sweepDown{
+    0%{ top: -4px; opacity: 1; }
+    90%{ opacity: 1; }
+    100%{ top: 100%; opacity: 0; }
+  }
+
+  .canvas-actions{
+    display: flex; justify-content: center; gap: 10px;
+    margin-top: 16px;
+  }
+  button.btn{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 9px 16px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  button.btn:hover{
+    border-color: var(--cyan-dim);
+    color: var(--text);
+  }
+  button.btn:active{ transform: translateY(1px); }
+  button.btn.primary{
+    border-color: var(--cyan-dim);
+    color: var(--cyan);
+  }
+  button.btn.primary:hover{
+    background: rgba(75,216,224,0.08);
+  }
+  button.btn:focus-visible{
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
+  }
+
+  .hint{
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-faint);
+    margin-top: 12px;
+  }
+
+  /* ---------- readout pane ---------- */
+  .readout-top{
+    display: flex; align-items: center; gap: 24px;
+    margin-bottom: 24px;
+  }
+  .predicted-digit{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 84px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--cyan);
+    min-width: 90px;
+    text-align: center;
+    text-shadow: 0 0 24px rgba(75,216,224,0.35);
+  }
+  .predicted-digit.empty{ color: var(--text-faint); text-shadow: none; }
+
+  .confidence-block{ flex: 1; }
+  .confidence-label{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .confidence-value{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    color: var(--text);
+  }
+
+  .bars{
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .bar-row{
+    display: grid;
+    grid-template-columns: 16px 1fr 44px;
+    align-items: center;
+    gap: 10px;
+  }
+  .bar-digit{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-faint);
+    text-align: right;
+  }
+  .bar-track{
+    height: 8px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    position: relative;
+    overflow: hidden;
+  }
+  .bar-fill{
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(to right, var(--cyan-dim), var(--cyan));
+    transition: width 0.4s cubic-bezier(.4,0,.2,1);
+  }
+  .bar-fill.top{
+    background: linear-gradient(to right, var(--amber-dim), var(--amber));
+  }
+  .bar-pct{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    text-align: right;
+  }
+
+  .grid-preview-wrap{
+    margin-top: 26px;
+    padding-top: 22px;
+    border-top: 1px solid var(--border-soft);
+    display: flex; align-items: center; gap: 18px;
+  }
+  #gridPreview{
+    width: 84px; height: 84px;
+    image-rendering: pixelated;
+    border: 1px solid var(--border);
+    background: #000;
+    flex-shrink: 0;
+  }
+  .grid-preview-text{
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-dim);
+  }
+  .grid-preview-text .mono{ color: var(--text-faint); font-size: 11px; }
+
+  /* ---------- pipeline section ---------- */
+  .section{ padding: 72px 0; }
+  .section-head{ margin-bottom: 40px; max-width: 620px; }
+  .section-kicker{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--amber);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  h2{
+    font-size: 26px;
+    font-weight: 600;
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+  }
+  .section-desc{
+    font-size: 14.5px;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+
+  .pipeline{
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+  }
+  @media (max-width: 900px){
+    .pipeline{ grid-template-columns: repeat(3, 1fr); }
+  }
+  .stage{
+    background: var(--panel);
+    padding: 20px 14px;
+    display: flex; flex-direction: column; align-items: center;
+    text-align: center;
+    gap: 10px;
+  }
+  .stage-viz{
+    width: 56px; height: 56px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .stage-name{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .stage-dim{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--text-faint);
+  }
+
+  /* mini visuals for pipeline stages, pure CSS */
+  .viz-grid{
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    gap: 1.5px;
+    width: 40px; height: 40px;
+  }
+  .viz-grid div{ background: var(--border-soft); }
+  .viz-grid div.on{ background: var(--cyan-dim); }
+
+  .viz-stack{
+    display: flex; gap: 2px; align-items: flex-end;
+  }
+  .viz-stack div{
+    width: 6px;
+    background: var(--cyan-dim);
+    border: 1px solid var(--cyan);
+  }
+
+  .viz-dot-col{
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .viz-dot-col div{
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--amber-dim);
+    border: 1px solid var(--amber);
+  }
+
+  .viz-output{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    color: var(--cyan);
+    font-weight: 700;
+  }
+
+  /* ---------- about / footer ---------- */
+  .about-grid{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+  }
+  @media (max-width: 700px){ .about-grid{ grid-template-columns: 1fr; } }
+  .about-card{
+    border: 1px solid var(--border);
+    background: var(--panel);
+    padding: 24px;
+  }
+  .about-card h3{
+    font-size: 15px;
+    margin: 0 0 10px;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .about-card p{
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    margin: 0;
+  }
+  .about-card p + p{ margin-top: 10px; }
+  .about-card .mono{ color: var(--text-faint); font-size: 12px; }
+
+  footer{
+    border-top: 1px solid var(--border-soft);
+    padding: 28px 0 40px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  @media (max-width: 500px){
+    h1{ font-size: 30px; }
+    .predicted-digit{ font-size: 60px; }
+    .readout-top{ gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap header-inner">
+    <div class="brand">
+      <span class="brand-mark">SCAN<span>LINE</span></span>
+      <span class="brand-sub">/ digit reader</span>
+    </div>
+    <div class="status-pill">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">loading weights…</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section class="hero">
+    <div class="eyebrow">runs entirely in your browser — no server, no upload</div>
+    <h1>Draw a digit. Watch a neural<br>network <em>read</em> it in real time.</h1>
+    <p class="lede">
+      This page loads a small convolutional network — the same kind of model that sorts mail
+      by reading handwritten ZIP codes — and runs it on your device. Every stroke you draw is
+      converted into the 28×28 pixel grid the model actually sees, then scanned through two
+      convolution layers to a prediction.
+    </p>
+
+    <div class="demo">
+      <div class="demo-pane">
+        <div class="pane-label">
+          <span>input</span>
+          <span class="mono">280×280</span>
+        </div>
+        <div class="canvas-frame">
+          <canvas id="drawCanvas" width="280" height="280"></canvas>
+          <div class="scanline-el" id="scanlineEl"></div>
+        </div>
+        <div class="canvas-actions">
+          <button class="btn primary" id="readBtn">Read digit</button>
+          <button class="btn" id="clearBtn">Clear</button>
+        </div>
+        <p class="hint">Draw one digit, 0–9, filling most of the box.</p>
+      </div>
+
+      <div class="demo-pane">
+        <div class="pane-label">
+          <span>prediction</span>
+          <span class="mono" id="inferTime">—</span>
+        </div>
+
+        <div class="readout-top">
+          <div class="predicted-digit empty" id="predictedDigit">–</div>
+          <div class="confidence-block">
+            <div class="confidence-label">confidence</div>
+            <div class="confidence-value" id="confidenceValue">—</div>
+          </div>
+        </div>
+
+        <div class="bars" id="bars"></div>
+
+        <div class="grid-preview-wrap">
+          <canvas id="gridPreview" width="28" height="28"></canvas>
+          <div class="grid-preview-text">
+            what the model sees<br>
+            <span class="mono">28×28, grayscale, centered</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="pipeline-section">
+    <div class="section-head">
+      <div class="section-kicker">how it reads</div>
+      <h2>Six layers between your pen and its answer</h2>
+      <p class="section-desc">
+        The network learns edges first, then shapes, then digits — each layer narrows a raw
+        grid of pixels into ten confidence scores.
+      </p>
+    </div>
+
+    <div class="pipeline" id="pipeline"></div>
+  </section>
+
+  <section class="section" id="about-section">
+    <div class="about-grid">
+      <div class="about-card">
+        <h3>The model</h3>
+        <p>
+          A compact CNN — two convolution + pooling stages feeding a 128-unit dense layer —
+          trained on handwritten digits. It has 225,034 parameters, all listed below,
+          and was exported directly from the uploaded <span class="mono">.h5</span> file.
+        </p>
+        <p class="mono">conv(32) → pool → conv(64) → pool → dense(128) → dense(10)</p>
+      </div>
+      <div class="about-card">
+        <h3>How the drawing becomes input</h3>
+        <p>
+          Your stroke is cropped to its bounding box, scaled to fit a 20×20 square, and
+          centered in a 28×28 canvas — the same normalization used when this network was
+          trained, so a small, off-center scribble reads as reliably as a large centered one.
+        </p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap" style="display:flex; justify-content:space-between; width:100%;">
+    <span>weights loaded once, inference runs on-device</span>
+    <span id="paramCount">225,034 parameters</span>
+  </div>
+</footer>
+
+<script src="model_data.js"></script>
+<script src="model.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
